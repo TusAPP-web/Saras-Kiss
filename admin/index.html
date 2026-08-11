@@ -374,15 +374,21 @@
       </div>
       <input type="hidden" id="movTipo">
 
-      <div class="field" id="movProductoField" style="display:none;">
-        <label>Producto (opcional, si es de catálogo)</label>
-        <select id="movProducto" onchange="autocompletarMontoVenta()">
-          <option value="">Otro / varios productos</option>
-        </select>
+      <div class="field" id="movClienteField" style="display:none;">
+        <label>Cliente (opcional)</label>
+        <input type="text" id="movCliente" placeholder="Nombre del cliente">
       </div>
-      <div class="field" id="movCantidadField" style="display:none;">
-        <label>Cantidad</label>
-        <input type="number" id="movCantidad" value="1" min="1" oninput="autocompletarMontoVenta()">
+
+      <div class="field" id="movProductoField" style="display:none;">
+        <label>Sumar producto a la venta</label>
+        <select id="movProducto">
+          <option value="">Otro producto (fuera de catálogo)</option>
+        </select>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <input type="number" id="movCantidad" value="1" min="1" style="flex:1;">
+          <button type="button" onclick="agregarItemVenta()" style="flex-shrink:0; padding:0 16px; border:none; border-radius:10px; background:var(--confirm); color:#fff; font-size:12px; font-weight:700;">+ Agregar</button>
+        </div>
+        <div id="movItemsList" style="margin-top:4px;"></div>
       </div>
 
       <div class="field" id="movCategoriaField" style="display:none;">
@@ -395,7 +401,7 @@
         <input type="text" id="movOrigen" placeholder="Ej: aporte propio, préstamo, etc.">
       </div>
 
-      <div class="field"><label>Monto</label><input type="number" id="movMonto"></div>
+      <div class="field"><label>Monto total</label><input type="number" id="movMonto"></div>
       <div class="field"><label>Descripción</label><input type="text" id="movDescripcion"></div>
       <div class="field"><label>Fecha</label><input type="date" id="movFecha"></div>
       <div class="field">
@@ -895,25 +901,51 @@ window.toggleStockInput = function(){
   document.getElementById('prodStockField').style.display = document.getElementById('prodControlaStock').checked ? 'block' : 'none';
 }
 
-window.agregarFotos = function(event){
-  const files = Array.from(event.target.files).slice(0, 4 - fotosTemp.length);
-  files.forEach(file => {
+// Comprime una imagen apuntando a un peso máximo (para gastar lo menos posible de Firebase).
+// Primero prueba bajando la calidad JPEG; si no alcanza, además va achicando el tamaño.
+function comprimirImagen(file, opciones){
+  const maxDim = (opciones && opciones.maxDim) || 640;
+  const maxKB = (opciones && opciones.maxKB) || 100;
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = function(e){
       const img = new Image();
       img.onload = function(){
-        const canvas = document.createElement('canvas');
-        const maxW = 800;
-        const scale = Math.min(1, maxW / img.width);
-        canvas.width = img.width * scale;
-        canvas.height = img.height * scale;
-        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-        fotosTemp.push(canvas.toDataURL('image/jpeg', 0.7));
-        renderFotosPreview();
+        let dim = maxDim;
+        let calidad = 0.78;
+        function render(){
+          const canvas = document.createElement('canvas');
+          const scale = Math.min(1, dim / Math.max(img.width, img.height));
+          canvas.width = Math.max(1, Math.round(img.width * scale));
+          canvas.height = Math.max(1, Math.round(img.height * scale));
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+          return canvas.toDataURL('image/jpeg', calidad);
+        }
+        let resultado = render();
+        let intentos = 0;
+        while((resultado.length * 0.75 / 1024) > maxKB && intentos < 10){
+          if(calidad > 0.3){ calidad = Math.round((calidad - 0.08) * 100) / 100; }
+          else { dim = Math.round(dim * 0.85); }
+          resultado = render();
+          intentos++;
+        }
+        resolve(resultado);
       };
+      img.onerror = () => reject(new Error('No se pudo leer la imagen'));
       img.src = e.target.result;
     };
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
     reader.readAsDataURL(file);
+  });
+}
+
+window.agregarFotos = function(event){
+  const files = Array.from(event.target.files).slice(0, 4 - fotosTemp.length);
+  files.forEach(file => {
+    comprimirImagen(file, { maxDim: 900, maxKB: 160 }).then(dataUrl => {
+      fotosTemp.push(dataUrl);
+      renderFotosPreview();
+    }).catch(err => { console.error(err); alert('No se pudo procesar una de las fotos.'); });
   });
   event.target.value = '';
 }
@@ -1068,13 +1100,16 @@ function renderMovimientos(){
     if(m.metodoPago) metaPartes.push(m.metodoPago === 'efectivo' ? 'Efectivo' : m.metodoPago === 'transferencia' ? 'Transferencia' : 'Otro');
     if(m.categoria) metaPartes.push(m.categoria);
     if(m.origen) metaPartes.push(m.origen);
+    if(m.cliente) metaPartes.push('Cliente: ' + m.cliente);
     if(m.comprobante) metaPartes.push('📎 con comprobante');
+    const detalleItems = (m.items && m.items.length) ? `<div style="font-size:11px; color:var(--ink-soft); margin-top:2px;">${m.items.map(i => `${i.nombre} x${i.cantidad}`).join(', ')}</div>` : '';
     return `
     <div class="mov-card">
       <div class="mov-top">
         <div>
           <span class="mov-tipo-tag ${claseTipo[m.tipo]}">${nombresTipo[m.tipo]}</span>
           <div class="mov-desc" style="margin:2px 0 0;">${m.descripcion || ''}</div>
+          ${detalleItems}
         </div>
         <div class="mov-monto ${esIngreso(m.tipo) ? 'ingreso' : 'egreso'}">${esIngreso(m.tipo) ? '+' : '-'}$${Number(m.monto).toLocaleString('es-AR')}</div>
       </div>
@@ -1086,23 +1121,53 @@ function renderMovimientos(){
   }).join('');
 }
 
+let movItemsTemp = [];
+
 window.elegirTipoMov = function(tipo){
   document.getElementById('movTipo').value = tipo;
   document.getElementById('tipoBtnVenta').classList.toggle('active', tipo === 'venta_manual');
   document.getElementById('tipoBtnGasto').classList.toggle('active', tipo === 'gasto');
   document.getElementById('tipoBtnInyeccion').classList.toggle('active', tipo === 'inyeccion');
+  document.getElementById('movClienteField').style.display = tipo === 'venta_manual' ? 'block' : 'none';
   document.getElementById('movProductoField').style.display = tipo === 'venta_manual' ? 'block' : 'none';
-  document.getElementById('movCantidadField').style.display = tipo === 'venta_manual' ? 'block' : 'none';
   document.getElementById('movCategoriaField').style.display = tipo === 'gasto' ? 'block' : 'none';
   document.getElementById('movOrigenField').style.display = tipo === 'inyeccion' ? 'block' : 'none';
 }
-window.autocompletarMontoVenta = function(){
+window.agregarItemVenta = function(){
   const sel = document.getElementById('movProducto');
-  const opt = sel.options[sel.selectedIndex];
-  const precio = opt ? Number(opt.dataset.precio) || 0 : 0;
-  if(!precio) return;
-  const cant = Number(document.getElementById('movCantidad').value) || 1;
-  document.getElementById('movMonto').value = precio * cant;
+  const productoId = sel.value;
+  const cantidad = Number(document.getElementById('movCantidad').value) || 1;
+  let nombre, precio;
+  if(productoId){
+    const prod = productos.find(p => p.id === productoId);
+    nombre = prod ? prod.nombre : 'Producto';
+    precio = prod ? Number(prod.precio) || 0 : 0;
+  } else {
+    nombre = document.getElementById('movDescripcion').value.trim() || 'Otro producto';
+    precio = 0;
+  }
+  movItemsTemp.push({ productoId: productoId || null, nombre, cantidad, precio });
+  sel.value = '';
+  document.getElementById('movCantidad').value = 1;
+  renderItemsVenta();
+}
+window.quitarItemVenta = function(idx){
+  movItemsTemp.splice(idx, 1);
+  renderItemsVenta();
+}
+function renderItemsVenta(){
+  const cont = document.getElementById('movItemsList');
+  if(movItemsTemp.length === 0){ cont.innerHTML = ''; return; }
+  cont.innerHTML = movItemsTemp.map((it,i) => `
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:1px solid var(--line); font-size:12px;">
+      <span>${it.nombre} x${it.cantidad}</span>
+      <span style="display:flex; align-items:center; gap:10px;">
+        <span style="font-family:'IBM Plex Mono', monospace;">$${(it.precio*it.cantidad).toLocaleString('es-AR')}</span>
+        <span onclick="quitarItemVenta(${i})" style="color:var(--danger); cursor:pointer; font-weight:700;">✕</span>
+      </span>
+    </div>`).join('');
+  const total = movItemsTemp.reduce((a,it) => a + it.precio*it.cantidad, 0);
+  if(total > 0) document.getElementById('movMonto').value = total;
 }
 
 window.abrirModalMovimiento = function(){
@@ -1114,9 +1179,12 @@ window.abrirModalMovimiento = function(){
   document.getElementById('movMetodoPago').value = '';
   document.getElementById('movProducto').value = '';
   document.getElementById('movCantidad').value = 1;
+  document.getElementById('movCliente').value = '';
   document.getElementById('movOrigen').value = '';
   document.getElementById('movCategoriaGasto').value = categoriasGastos[0] ? categoriasGastos[0].nombre : '';
   document.getElementById('movDeleteBtn').style.display = 'none';
+  movItemsTemp = [];
+  renderItemsVenta();
   comprobanteTemp = null;
   renderComprobantePreview();
   elegirTipoMov('venta_manual');
@@ -1134,9 +1202,12 @@ window.editarMovimiento = function(id){
   document.getElementById('movFecha').value = fechaMovDate(m).toISOString().slice(0,10);
   document.getElementById('movMetodoPago').value = m.metodoPago || '';
   document.getElementById('movOrigen').value = m.origen || '';
+  document.getElementById('movCliente').value = m.cliente || '';
   document.getElementById('movCategoriaGasto').value = m.categoria || (categoriasGastos[0] ? categoriasGastos[0].nombre : '');
-  document.getElementById('movProducto').value = (m.items && m.items[0] && m.items[0].productoId) || '';
-  document.getElementById('movCantidad').value = (m.items && m.items[0] && m.items[0].cantidad) || 1;
+  document.getElementById('movProducto').value = '';
+  document.getElementById('movCantidad').value = 1;
+  movItemsTemp = (m.items || []).map(it => ({ ...it }));
+  renderItemsVenta();
   document.getElementById('movDeleteBtn').style.display = 'block';
   comprobanteTemp = m.comprobante || null;
   renderComprobantePreview();
@@ -1147,22 +1218,10 @@ window.editarMovimiento = function(id){
 window.agregarComprobante = function(event){
   const file = event.target.files[0];
   if(!file) return;
-  const reader = new FileReader();
-  reader.onload = function(e){
-    const img = new Image();
-    img.onload = function(){
-      const canvas = document.createElement('canvas');
-      const maxW = 800;
-      const scale = Math.min(1, maxW / img.width);
-      canvas.width = img.width * scale;
-      canvas.height = img.height * scale;
-      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-      comprobanteTemp = canvas.toDataURL('image/jpeg', 0.7);
-      renderComprobantePreview();
-    };
-    img.src = e.target.result;
-  };
-  reader.readAsDataURL(file);
+  comprimirImagen(file, { maxDim: 640, maxKB: 80 }).then(dataUrl => {
+    comprobanteTemp = dataUrl;
+    renderComprobantePreview();
+  }).catch(err => { console.error(err); alert('No se pudo procesar la imagen del comprobante.'); });
   event.target.value = '';
 }
 function renderComprobantePreview(){
@@ -1197,15 +1256,8 @@ window.guardarMovimiento = async function(){
     data.origen = document.getElementById('movOrigen').value.trim();
   }
   if(tipo === 'venta_manual'){
-    const sel = document.getElementById('movProducto');
-    const productoId = sel.value;
-    if(productoId){
-      const prod = productos.find(p => p.id === productoId);
-      const cantidad = Number(document.getElementById('movCantidad').value) || 1;
-      data.items = [{ productoId, nombre: prod ? prod.nombre : '', cantidad, precio: prod ? prod.precio : 0 }];
-    } else {
-      data.items = [];
-    }
+    data.cliente = document.getElementById('movCliente').value.trim();
+    data.items = movItemsTemp.map(it => ({ productoId: it.productoId, nombre: it.nombre, cantidad: it.cantidad, precio: it.precio }));
   }
   if(id){
     await updateDoc(doc(db, "movimientos", id), data);
