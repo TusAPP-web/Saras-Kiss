@@ -560,18 +560,39 @@ document.querySelectorAll('.periodo-btn').forEach(btn => {
 });
 
 // ---------- CARGA GENERAL ----------
+function mensajeErrorFirebase(e, contexto){
+  const codigo = e && e.code ? e.code : (e && e.message ? e.message : 'desconocido');
+  let texto = 'No se pudo cargar ' + contexto + '.';
+  if(codigo.includes('permission-denied')){
+    texto += ' Firebase está rechazando el permiso (revisar Reglas de Firestore).';
+  } else if(codigo.includes('unavailable') || codigo.includes('network')){
+    texto += ' Parece un problema de conexión a internet.';
+  } else if(codigo.includes('failed-precondition') || codigo.includes('index')){
+    texto += ' Falta crear un índice en Firestore para esta consulta.';
+  }
+  return `<div class="empty" style="color:var(--danger);">${texto}<br><span style="font-size:10px; opacity:.75;">[${codigo}]</span></div>`;
+}
+
 async function cargarTodo(){
-  await Promise.all([cargarPedidos(), cargarProductos(), cargarCategorias()]);
-  await Promise.all([cargarCategoriasGastos(), cargarMovimientos(), cargarCamposEntrega()]);
-  renderResumen();
+  const resultados = await Promise.allSettled([
+    cargarPedidos(), cargarProductos(), cargarCategorias(),
+    cargarCategoriasGastos(), cargarMovimientos(), cargarCamposEntrega()
+  ]);
+  resultados.forEach(r => { if(r.status === 'rejected') console.error(r.reason); });
+  try{ renderResumen(); }catch(e){ console.error(e); }
 }
 
 // ---------- PEDIDOS ----------
 async function cargarPedidos(){
-  const q = query(collection(db, "pedidos"), orderBy("fecha", "desc"));
-  const snap = await getDocs(q);
-  pedidos = snap.docs.map(d => ({ id:d.id, ...d.data() }));
-  renderPedidos();
+  try{
+    const q = query(collection(db, "pedidos"), orderBy("fecha", "desc"));
+    const snap = await getDocs(q);
+    pedidos = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+    renderPedidos();
+  }catch(e){
+    document.getElementById('pedidosList').innerHTML = mensajeErrorFirebase(e, 'los pedidos');
+    throw e;
+  }
 }
 function esRespondido(p){ return !!(p.respondido || p.cobrado || p.estado === 'atendido'); }
 function esCobrado(p){ return !!(p.cobrado || p.estado === 'atendido'); }
@@ -661,10 +682,15 @@ window.borrarPedido = async function(id){
 
 // ---------- CATEGORÍAS ----------
 async function cargarCategorias(){
-  const snap = await getDocs(collection(db, "categorias"));
-  categorias = snap.docs.map(d => ({ id:d.id, ...d.data() }));
-  renderCategorias();
-  renderSelectCategorias();
+  try{
+    const snap = await getDocs(collection(db, "categorias"));
+    categorias = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+    renderCategorias();
+    renderSelectCategorias();
+  }catch(e){
+    document.getElementById('categoriasList').innerHTML = mensajeErrorFirebase(e, 'las categorías');
+    throw e;
+  }
 }
 function renderCategorias(){
   const cont = document.getElementById('categoriasList');
@@ -721,6 +747,7 @@ window.renderSubcategoriaSelect = function(){
 
 // ---------- CAMPOS DE ENTREGA ----------
 async function cargarCamposEntrega(){
+  try{
   const snap = await getDocs(collection(db, "camposEntrega"));
   camposEntrega = snap.docs.map(d => ({ id:d.id, ...d.data() })).sort((a,b) => (a.orden||0)-(b.orden||0));
   if(camposEntrega.length === 0){
@@ -739,6 +766,10 @@ async function cargarCamposEntrega(){
     camposEntrega = snap2.docs.map(d => ({ id:d.id, ...d.data() })).sort((a,b) => (a.orden||0)-(b.orden||0));
   }
   renderCamposEntregaList();
+  }catch(e){
+    document.getElementById('camposEntregaList').innerHTML = mensajeErrorFirebase(e, 'los campos de entrega');
+    throw e;
+  }
 }
 function renderCamposEntregaList(){
   const cont = document.getElementById('camposEntregaList');
@@ -797,10 +828,15 @@ window.borrarCampoEntrega = async function(id){
 
 // ---------- PRODUCTOS ----------
 async function cargarProductos(){
-  const snap = await getDocs(collection(db, "productos"));
-  productos = snap.docs.map(d => ({ id:d.id, ...d.data() }));
-  renderProductos();
-  if(typeof renderSelectProductosMov === 'function') renderSelectProductosMov();
+  try{
+    const snap = await getDocs(collection(db, "productos"));
+    productos = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+    renderProductos();
+    if(typeof renderSelectProductosMov === 'function') renderSelectProductosMov();
+  }catch(e){
+    document.getElementById('productosList').innerHTML = mensajeErrorFirebase(e, 'los productos');
+    throw e;
+  }
 }
 function renderProductos(){
   const cont = document.getElementById('productosList');
@@ -922,18 +958,23 @@ window.borrarProducto = async function(){
 
 // ---------- CATEGORÍAS DE GASTOS ----------
 async function cargarCategoriasGastos(){
-  const snap = await getDocs(collection(db, "categoriasGastos"));
-  categoriasGastos = snap.docs.map(d => ({ id:d.id, ...d.data() }));
-  if(categoriasGastos.length === 0){
-    const base = ['Materiales', 'Envío', 'Herramientas', 'Empaque', 'Otros'];
-    for(const nombre of base){
-      await addDoc(collection(db, "categoriasGastos"), { nombre });
+  try{
+    const snap = await getDocs(collection(db, "categoriasGastos"));
+    categoriasGastos = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+    if(categoriasGastos.length === 0){
+      const base = ['Materiales', 'Envío', 'Herramientas', 'Empaque', 'Otros'];
+      for(const nombre of base){
+        await addDoc(collection(db, "categoriasGastos"), { nombre });
+      }
+      const snap2 = await getDocs(collection(db, "categoriasGastos"));
+      categoriasGastos = snap2.docs.map(d => ({ id:d.id, ...d.data() }));
     }
-    const snap2 = await getDocs(collection(db, "categoriasGastos"));
-    categoriasGastos = snap2.docs.map(d => ({ id:d.id, ...d.data() }));
+    renderCategoriasGastos();
+    renderSelectsCategoriaGasto();
+  }catch(e){
+    document.getElementById('catGastosList').innerHTML = mensajeErrorFirebase(e, 'las categorías de gastos');
+    throw e;
   }
-  renderCategoriasGastos();
-  renderSelectsCategoriaGasto();
 }
 function renderCategoriasGastos(){
   const cont = document.getElementById('catGastosList');
@@ -969,11 +1010,16 @@ function renderSelectProductosMov(){
 
 // ---------- MOVIMIENTOS ----------
 async function cargarMovimientos(){
-  const q = query(collection(db, "movimientos"), orderBy("fecha", "desc"));
-  const snap = await getDocs(q);
-  movimientos = snap.docs.map(d => ({ id:d.id, ...d.data() }));
-  renderSelectProductosMov();
-  renderMovimientos();
+  try{
+    const q = query(collection(db, "movimientos"), orderBy("fecha", "desc"));
+    const snap = await getDocs(q);
+    movimientos = snap.docs.map(d => ({ id:d.id, ...d.data() }));
+    renderSelectProductosMov();
+    renderMovimientos();
+  }catch(e){
+    document.getElementById('movimientosList').innerHTML = mensajeErrorFirebase(e, 'los movimientos');
+    throw e;
+  }
 }
 
 function fechaMovDate(m){

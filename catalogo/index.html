@@ -338,7 +338,8 @@ async function cargarDatos(){
     renderGrid();
     renderCamposEntrega();
   }catch(e){
-    document.getElementById('loadingMsg').textContent = 'No se pudo cargar el catálogo. Revisá tu conexión.';
+    const codigo = e && e.code ? e.code : (e && e.message ? e.message : 'desconocido');
+    document.getElementById('loadingMsg').innerHTML = 'No se pudo cargar el catálogo. Revisá tu conexión.<br><span style="font-size:10px; opacity:.7;">[' + codigo + ']</span>';
     console.error(e);
   }
 }
