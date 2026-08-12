@@ -566,17 +566,33 @@ document.querySelectorAll('.periodo-btn').forEach(btn => {
 });
 
 // ---------- CARGA GENERAL ----------
-function mensajeErrorFirebase(e, contexto){
+// Si Firebase no contesta en este tiempo, cortamos la espera y avisamos
+// en vez de dejar la pantalla colgada para siempre.
+function conTimeout(promesa, ms){
+  return Promise.race([
+    promesa,
+    new Promise((_, reject) => setTimeout(() => {
+      const err = new Error('tiempo-agotado');
+      err.code = 'tiempo-agotado';
+      reject(err);
+    }, ms))
+  ]);
+}
+
+function mensajeErrorFirebase(e, contexto, funcionReintentar){
   const codigo = e && e.code ? e.code : (e && e.message ? e.message : 'desconocido');
   let texto = 'No se pudo cargar ' + contexto + '.';
-  if(codigo.includes('permission-denied')){
+  if(codigo === 'tiempo-agotado'){
+    texto = 'La conexión está tardando demasiado para cargar ' + contexto + '.';
+  } else if(codigo.includes('permission-denied')){
     texto += ' Firebase está rechazando el permiso (revisar Reglas de Firestore).';
   } else if(codigo.includes('unavailable') || codigo.includes('network')){
     texto += ' Parece un problema de conexión a internet.';
   } else if(codigo.includes('failed-precondition') || codigo.includes('index')){
     texto += ' Falta crear un índice en Firestore para esta consulta.';
   }
-  return `<div class="empty" style="color:var(--danger);">${texto}<br><span style="font-size:10px; opacity:.75;">[${codigo}]</span></div>`;
+  const boton = funcionReintentar ? ` <button onclick="${funcionReintentar}()" style="margin-left:4px; padding:5px 12px; border:none; border-radius:8px; background:var(--accent-deep); color:#fff; font-size:11px;">Reintentar</button>` : '';
+  return `<div class="empty" style="color:var(--danger);">${texto}${boton}<br><span style="font-size:10px; opacity:.75;">[${codigo}]</span></div>`;
 }
 
 async function cargarTodo(){
@@ -592,11 +608,11 @@ async function cargarTodo(){
 async function cargarPedidos(){
   try{
     const q = query(collection(db, "pedidos"), orderBy("fecha", "desc"));
-    const snap = await getDocs(q);
+    const snap = await conTimeout(getDocs(q), 12000);
     pedidos = snap.docs.map(d => ({ id:d.id, ...d.data() }));
     renderPedidos();
   }catch(e){
-    document.getElementById('pedidosList').innerHTML = mensajeErrorFirebase(e, 'los pedidos');
+    document.getElementById('pedidosList').innerHTML = mensajeErrorFirebase(e, 'los pedidos', 'cargarPedidos');
     throw e;
   }
 }
@@ -689,12 +705,12 @@ window.borrarPedido = async function(id){
 // ---------- CATEGORÍAS ----------
 async function cargarCategorias(){
   try{
-    const snap = await getDocs(collection(db, "categorias"));
+    const snap = await conTimeout(getDocs(collection(db, "categorias")), 12000);
     categorias = snap.docs.map(d => ({ id:d.id, ...d.data() }));
     renderCategorias();
     renderSelectCategorias();
   }catch(e){
-    document.getElementById('categoriasList').innerHTML = mensajeErrorFirebase(e, 'las categorías');
+    document.getElementById('categoriasList').innerHTML = mensajeErrorFirebase(e, 'las categorías', 'cargarCategorias');
     throw e;
   }
 }
@@ -754,7 +770,7 @@ window.renderSubcategoriaSelect = function(){
 // ---------- CAMPOS DE ENTREGA ----------
 async function cargarCamposEntrega(){
   try{
-  const snap = await getDocs(collection(db, "camposEntrega"));
+  const snap = await conTimeout(getDocs(collection(db, "camposEntrega")), 12000);
   camposEntrega = snap.docs.map(d => ({ id:d.id, ...d.data() })).sort((a,b) => (a.orden||0)-(b.orden||0));
   if(camposEntrega.length === 0){
     const base = [
@@ -773,7 +789,7 @@ async function cargarCamposEntrega(){
   }
   renderCamposEntregaList();
   }catch(e){
-    document.getElementById('camposEntregaList').innerHTML = mensajeErrorFirebase(e, 'los campos de entrega');
+    document.getElementById('camposEntregaList').innerHTML = mensajeErrorFirebase(e, 'los campos de entrega', 'cargarCamposEntrega');
     throw e;
   }
 }
@@ -835,12 +851,12 @@ window.borrarCampoEntrega = async function(id){
 // ---------- PRODUCTOS ----------
 async function cargarProductos(){
   try{
-    const snap = await getDocs(collection(db, "productos"));
+    const snap = await conTimeout(getDocs(collection(db, "productos")), 12000);
     productos = snap.docs.map(d => ({ id:d.id, ...d.data() }));
     renderProductos();
     if(typeof renderSelectProductosMov === 'function') renderSelectProductosMov();
   }catch(e){
-    document.getElementById('productosList').innerHTML = mensajeErrorFirebase(e, 'los productos');
+    document.getElementById('productosList').innerHTML = mensajeErrorFirebase(e, 'los productos', 'cargarProductos');
     throw e;
   }
 }
@@ -991,7 +1007,7 @@ window.borrarProducto = async function(){
 // ---------- CATEGORÍAS DE GASTOS ----------
 async function cargarCategoriasGastos(){
   try{
-    const snap = await getDocs(collection(db, "categoriasGastos"));
+    const snap = await conTimeout(getDocs(collection(db, "categoriasGastos")), 12000);
     categoriasGastos = snap.docs.map(d => ({ id:d.id, ...d.data() }));
     if(categoriasGastos.length === 0){
       const base = ['Materiales', 'Envío', 'Herramientas', 'Empaque', 'Otros'];
@@ -1004,7 +1020,7 @@ async function cargarCategoriasGastos(){
     renderCategoriasGastos();
     renderSelectsCategoriaGasto();
   }catch(e){
-    document.getElementById('catGastosList').innerHTML = mensajeErrorFirebase(e, 'las categorías de gastos');
+    document.getElementById('catGastosList').innerHTML = mensajeErrorFirebase(e, 'las categorías de gastos', 'cargarCategoriasGastos');
     throw e;
   }
 }
@@ -1044,12 +1060,12 @@ function renderSelectProductosMov(){
 async function cargarMovimientos(){
   try{
     const q = query(collection(db, "movimientos"), orderBy("fecha", "desc"));
-    const snap = await getDocs(q);
+    const snap = await conTimeout(getDocs(q), 12000);
     movimientos = snap.docs.map(d => ({ id:d.id, ...d.data() }));
     renderSelectProductosMov();
     renderMovimientos();
   }catch(e){
-    document.getElementById('movimientosList').innerHTML = mensajeErrorFirebase(e, 'los movimientos');
+    document.getElementById('movimientosList').innerHTML = mensajeErrorFirebase(e, 'los movimientos', 'cargarMovimientos');
     throw e;
   }
 }

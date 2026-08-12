@@ -320,13 +320,29 @@ let carrito = []; // { id, nombre, precio, cantidad, stock }
 let categoriaActiva = "Todo";
 let productoDetalleActual = null;
 
+// Si Firebase no contesta en este tiempo, cortamos la espera y avisamos
+// en vez de dejar la pantalla colgada para siempre.
+function conTimeout(promesa, ms, mensajeTimeout){
+  return Promise.race([
+    promesa,
+    new Promise((_, reject) => setTimeout(() => {
+      const err = new Error(mensajeTimeout || 'tiempo-agotado');
+      err.code = 'tiempo-agotado';
+      reject(err);
+    }, ms))
+  ]);
+}
+
 async function cargarDatos(){
+  document.getElementById('loadingMsg').style.display = 'block';
+  document.getElementById('loadingMsg').innerHTML = 'Cargando catálogo…';
+  document.getElementById('emptyMsg').style.display = 'none';
   try{
-    const [prodSnap, catSnap, campSnap] = await Promise.all([
+    const [prodSnap, catSnap, campSnap] = await conTimeout(Promise.all([
       getDocs(collection(db, "productos")),
       getDocs(collection(db, "categorias")),
       getDocs(collection(db, "camposEntrega"))
-    ]);
+    ]), 12000);
     productos = prodSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(p => p.activo !== false);
     categorias = catSnap.docs.map(d => ({ id: d.id, ...d.data() }));
     camposEntrega = campSnap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => (a.orden||0)-(b.orden||0));
@@ -339,7 +355,11 @@ async function cargarDatos(){
     renderCamposEntrega();
   }catch(e){
     const codigo = e && e.code ? e.code : (e && e.message ? e.message : 'desconocido');
-    document.getElementById('loadingMsg').innerHTML = 'No se pudo cargar el catálogo. Revisá tu conexión.<br><span style="font-size:10px; opacity:.7;">[' + codigo + ']</span>';
+    let motivo = 'No se pudo cargar el catálogo.';
+    if(codigo === 'tiempo-agotado') motivo = 'La conexión está tardando demasiado.';
+    document.getElementById('loadingMsg').innerHTML = motivo +
+      ' <button onclick="cargarDatos()" style="margin-left:6px; padding:6px 14px; border:none; border-radius:8px; background:var(--accent-deep); color:#fff; font-size:12px;">Reintentar</button>' +
+      '<br><span style="font-size:10px; opacity:.7;">[' + codigo + ']</span>';
     console.error(e);
   }
 }
