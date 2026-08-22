@@ -245,6 +245,7 @@
       </div>
 
       <div class="tab" id="tab-productos">
+        <button id="btnOptimizarFotos" onclick="optimizarFotosViejas()" style="width:100%; padding:10px; margin-bottom:12px; border:1px dashed var(--accent); background:var(--icon-bg); color:var(--accent-deep); border-radius:10px; font-size:11.5px; font-weight:700;">Optimizar fotos de productos viejos</button>
         <div id="productosList"><div class="empty">Cargando productos…</div></div>
       </div>
 
@@ -429,7 +430,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import {
-  getFirestore, collection, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, query, orderBy
+  getFirestore, collection, getDocs, getDoc, setDoc, addDoc, updateDoc, deleteDoc, deleteField, doc, serverTimestamp, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import {
   getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, sendPasswordResetEmail
@@ -865,7 +866,7 @@ function renderProductos(){
   if(productos.length === 0){ cont.innerHTML = '<div class="empty">Todavía no cargaste productos. Tocá el botón + para agregar el primero.</div>'; return; }
   cont.innerHTML = productos.map(p => `
     <div class="prod-card">
-      <div class="prod-thumb">${p.fotos && p.fotos[0] ? `<img src="${p.fotos[0]}">` : ''}</div>
+      <div class="prod-thumb">${p.fotoPortada ? `<img src="${p.fotoPortada}">` : (p.fotos && p.fotos[0] ? `<img src="${p.fotos[0]}">` : '')}</div>
       <div class="prod-info">
         <div class="prod-nombre">${p.nombre}</div>
         <div class="prod-meta">${p.categoria||''}${p.subcategoria ? ' / '+p.subcategoria : ''}</div>
@@ -892,7 +893,7 @@ window.abrirModalProducto = function(){
 }
 window.cerrarModalProducto = function(){ document.getElementById('modalProducto').classList.remove('open'); }
 
-window.editarProducto = function(id){
+window.editarProducto = async function(id){
   const p = productos.find(x => x.id === id);
   document.getElementById('modalProdTitulo').textContent = 'Editar producto';
   document.getElementById('prodId').value = p.id;
@@ -908,9 +909,22 @@ window.editarProducto = function(id){
   document.getElementById('prodStock').value = controla ? p.stock : '';
   document.getElementById('prodStockField').style.display = controla ? 'block' : 'none';
   document.getElementById('prodDeleteBtn').style.display = 'block';
-  fotosTemp = p.fotos ? [...p.fotos] : [];
-  renderFotosPreview();
+
   document.getElementById('modalProducto').classList.add('open');
+
+  if(p.fotos && p.fotos.length){
+    // Producto viejo, todavía sin migrar: ya tenemos sus fotos en memoria.
+    fotosTemp = [...p.fotos];
+    renderFotosPreview();
+  } else {
+    fotosTemp = [];
+    document.getElementById('fotosPreview').innerHTML = '<div class="empty" style="padding:10px 0;">Cargando fotos…</div>';
+    try{
+      const snap = await getDoc(doc(db, "productosFotos", id));
+      fotosTemp = (snap.exists() && snap.data().fotos) ? [...snap.data().fotos] : [];
+    }catch(e){ console.error('No se pudieron traer las fotos', e); }
+    renderFotosPreview();
+  }
 }
 
 window.toggleStockInput = function(){
@@ -955,6 +969,73 @@ function comprimirImagen(file, opciones){
   });
 }
 
+// Igual que comprimirImagen, pero partiendo de una imagen que ya está en memoria (dataURL),
+// no de un archivo nuevo. Se usa para la miniatura y para recomprimir fotos viejas.
+function comprimirImagenDesdeDataUrl(dataUrlOriginal, opciones){
+  const maxDim = (opciones && opciones.maxDim) || 640;
+  const maxKB = (opciones && opciones.maxKB) || 100;
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = function(){
+      let dim = maxDim;
+      let calidad = 0.78;
+      function render(){
+        const canvas = document.createElement('canvas');
+        const scale = Math.min(1, dim / Math.max(img.width, img.height));
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        return canvas.toDataURL('image/jpeg', calidad);
+      }
+      let resultado = render();
+      let intentos = 0;
+      while((resultado.length * 0.75 / 1024) > maxKB && intentos < 10){
+        if(calidad > 0.3){ calidad = Math.round((calidad - 0.08) * 100) / 100; }
+        else { dim = Math.round(dim * 0.85); }
+        resultado = render();
+        intentos++;
+      }
+      resolve(resultado);
+    };
+    img.onerror = () => reject(new Error('No se pudo leer la imagen'));
+    img.src = dataUrlOriginal;
+  });
+}
+
+window.optimizarFotosViejas = async function(){
+  const btn = document.getElementById('btnOptimizarFotos');
+  const viejos = productos.filter(p => p.fotos && p.fotos.length);
+  if(viejos.length === 0){
+    alert('No hay productos con fotos en formato viejo — ya está todo optimizado.');
+    return;
+  }
+  if(!confirm(`Se van a optimizar ${viejos.length} producto(s). Puede tardar unos minutos, no cierres la app mientras tanto. ¿Continuar?`)) return;
+
+  btn.disabled = true;
+  let ok = 0, fallidos = 0;
+  for(let i = 0; i < viejos.length; i++){
+    const p = viejos[i];
+    btn.textContent = `Optimizando ${i+1} de ${viejos.length}…`;
+    try{
+      const fotosRecomprimidas = [];
+      for(const f of p.fotos){
+        fotosRecomprimidas.push(await comprimirImagenDesdeDataUrl(f, { maxDim: 900, maxKB: 160 }));
+      }
+      const fotoPortada = await comprimirImagenDesdeDataUrl(p.fotos[0], { maxDim: 220, maxKB: 18 });
+      await setDoc(doc(db, "productosFotos", p.id), { fotos: fotosRecomprimidas });
+      await updateDoc(doc(db, "productos", p.id), { fotoPortada, fotos: deleteField() });
+      ok++;
+    }catch(e){
+      console.error('No se pudo optimizar', p.id, e);
+      fallidos++;
+    }
+  }
+  btn.disabled = false;
+  btn.textContent = 'Optimizar fotos de productos viejos';
+  await cargarProductos();
+  alert(`Listo. Se optimizaron ${ok} producto(s)${fallidos ? ` (${fallidos} tuvieron un error, revisalos a mano)` : ''}. El catálogo debería cargar mucho más rápido ahora.`);
+}
+
 window.agregarFotos = function(event){
   const files = Array.from(event.target.files).slice(0, 4 - fotosTemp.length);
   files.forEach(file => {
@@ -975,6 +1056,12 @@ window.quitarFoto = function(i){ fotosTemp.splice(i,1); renderFotosPreview(); }
 window.guardarProducto = async function(){
   const id = document.getElementById('prodId').value;
   const controla = document.getElementById('prodControlaStock').checked;
+  let fotoPortada = null;
+  if(fotosTemp.length){
+    try{
+      fotoPortada = await comprimirImagenDesdeDataUrl(fotosTemp[0], { maxDim: 220, maxKB: 18 });
+    }catch(e){ console.error('No se pudo generar la miniatura', e); }
+  }
   const data = {
     nombre: document.getElementById('prodNombre').value.trim(),
     precio: Number(document.getElementById('prodPrecio').value) || 0,
@@ -982,16 +1069,23 @@ window.guardarProducto = async function(){
     categoria: document.getElementById('prodCategoria').value || '',
     subcategoria: document.getElementById('prodSubcategoria').value || '',
     stock: controla ? Number(document.getElementById('prodStock').value) || 0 : null,
-    fotos: fotosTemp,
+    fotoPortada,
+    fotos: deleteField(), // por si el producto era viejo y tenía fotos pesadas adentro
     activo: true
   };
   if(!data.nombre){ alert('Poné un nombre para el producto.'); return; }
+
+  let prodId = id;
   if(id){
     await updateDoc(doc(db, "productos", id), data);
   } else {
     data.creado = serverTimestamp();
-    await addDoc(collection(db, "productos"), data);
+    const nuevo = await addDoc(collection(db, "productos"), data);
+    prodId = nuevo.id;
   }
+  // Las fotos completas van aparte, y solo se piden cuando alguien abre ESE producto puntual.
+  await setDoc(doc(db, "productosFotos", prodId), { fotos: fotosTemp });
+
   cerrarModalProducto();
   await cargarProductos();
 }
@@ -1000,6 +1094,7 @@ window.borrarProducto = async function(){
   if(!id) return;
   if(!confirm('¿Eliminar este producto del catálogo?')) return;
   await deleteDoc(doc(db, "productos", id));
+  await deleteDoc(doc(db, "productosFotos", id)).catch(()=>{});
   cerrarModalProducto();
   await cargarProductos();
 }

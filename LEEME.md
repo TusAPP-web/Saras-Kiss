@@ -37,6 +37,43 @@ Ejemplo: si el número es 376-4123456 (Misiones), tenés que poner:
   pedidos (los que van llegando por WhatsApp también quedan guardados acá, con un botón para
   abrir WhatsApp y responderle al cliente directo, y marcar el pedido como atendido).
 
+## Novedad de esta entrega: catálogo lento por las fotos (arreglado)
+
+Encontramos por qué el catálogo tardaba tanto en cargar en algunos celulares: cada producto
+guardaba TODAS sus fotos como texto pesado adentro del mismo documento, y el catálogo
+descargaba las fotos de TODOS los productos apenas se abría, aunque el cliente solo fuera
+a mirar dos o tres.
+
+Ahora:
+- Cada producto guarda una miniatura chiquita (para la grilla) y las fotos completas quedan
+  en un lugar aparte, que recién se pide cuando alguien toca ESE producto puntual.
+- En el panel, dentro de "Productos", hay un botón nuevo **"Optimizar fotos de productos
+  viejos"** — tocalo una sola vez después de subir esta actualización, para que los
+  productos que ya tenías cargados se acomoden al formato nuevo (achica las fotos viejas
+  y las separa). Los productos que cargues de acá en adelante ya se guardan bien solos,
+  no hace falta volver a tocar ese botón para ellos.
+
+### ⚠️ Paso obligatorio en Firebase antes de usar esta actualización
+
+Hay una colección nueva, `productosFotos`, que también necesita su regla de acceso:
+
+1. Entrá a la [consola de Firebase](https://console.firebase.google.com/), proyecto
+   "saraskiss" (cuenta sasmivera@gmail.com).
+2. **Firestore Database → Reglas**.
+3. Agregá, junto a las demás reglas (dentro de las mismas llaves), esta sección:
+
+   ```
+   match /productosFotos/{id} {
+     allow read: if true;
+     allow write: if request.auth != null;
+   }
+   ```
+
+4. Tocá **Publicar**.
+
+Si no hacés este paso, el catálogo no va a poder mostrar las fotos al abrir el detalle de
+un producto (va a decir "sin foto" aunque sí tenga).
+
 ## Novedad de esta entrega: módulo de Cuentas
 
 Se agregó una pestaña nueva "Cuentas" en el panel de tu señora, con tres sub-secciones:

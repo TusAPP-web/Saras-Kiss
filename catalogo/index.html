@@ -308,7 +308,7 @@
 <script src="../config.js"></script>
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-import { getFirestore, collection, getDocs, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { getFirestore, collection, getDocs, getDoc, doc, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
@@ -389,7 +389,7 @@ function renderGrid(){
   const grid = document.getElementById('grid');
   const lista = categoriaActiva === 'Todo' ? productos : productos.filter(p => p.categoria === categoriaActiva);
   grid.innerHTML = lista.map(p => {
-    const foto = (p.fotos && p.fotos[0]) ? `<img src="${p.fotos[0]}">` : iconoGenerico();
+    const foto = p.fotoPortada ? `<img src="${p.fotoPortada}">` : ((p.fotos && p.fotos[0]) ? `<img src="${p.fotos[0]}">` : iconoGenerico());
     let stockTag = '';
     if(p.stock !== null && p.stock !== undefined){
       if(p.stock <= 0) stockTag = `<span class="stock-tag out">Sin stock</span>`;
@@ -585,7 +585,7 @@ window.enviarPedido = async function(){
 }
 
 // ---- Detalle de producto ----
-window.abrirDetalle = function(id){
+window.abrirDetalle = async function(id){
   const p = productos.find(x => x.id === id);
   productoDetalleActual = p;
   document.getElementById('dName').textContent = p.nombre;
@@ -600,19 +600,39 @@ window.abrirDetalle = function(id){
   }
   document.getElementById('dStock').innerHTML = stockHtml;
 
-  const fotos = (p.fotos && p.fotos.length) ? p.fotos : [null];
-  document.getElementById('galleryTrack').innerHTML = fotos.map(f =>
-    `<div class="slide">${f ? `<img src="${f}">` : iconoGenerico()}</div>`
-  ).join('');
-  document.getElementById('dots').innerHTML = fotos.map((_,i) => `<div class="dot ${i===0?'on':''}"></div>`).join('');
-
   document.getElementById('dAddBtn').onclick = function(){
     const cant = parseInt(document.getElementById('dQty').textContent);
     agregarAlCarrito(p, cant);
     cerrarDetalle();
   };
-
   document.getElementById('detail').classList.add('open');
+
+  // Mientras llegan las fotos completas, mostramos la miniatura que ya tenemos (si hay)
+  const previewInicial = p.fotoPortada || (p.fotos && p.fotos[0]) || null;
+  document.getElementById('galleryTrack').innerHTML = `<div class="slide">${previewInicial ? `<img src="${previewInicial}">` : iconoGenerico()}</div>`;
+  document.getElementById('dots').innerHTML = '';
+
+  // Producto viejo (todavía no migrado) que ya trae el array completo cargado: lo usamos directo.
+  if(p.fotos && p.fotos.length){
+    pintarGaleria(p.fotos);
+    return;
+  }
+
+  // Producto nuevo (liviano): pedimos sus fotos completas recién ahora, solo de este producto.
+  try{
+    const snap = await getDoc(doc(db, "productosFotos", id));
+    const fotos = (snap.exists() && snap.data().fotos && snap.data().fotos.length) ? snap.data().fotos : (previewInicial ? [previewInicial] : [null]);
+    pintarGaleria(fotos);
+  }catch(e){
+    console.error('No se pudieron traer las fotos del producto', e);
+    pintarGaleria(previewInicial ? [previewInicial] : [null]);
+  }
+}
+function pintarGaleria(fotos){
+  document.getElementById('galleryTrack').innerHTML = fotos.map(f =>
+    `<div class="slide">${f ? `<img src="${f}">` : iconoGenerico()}</div>`
+  ).join('');
+  document.getElementById('dots').innerHTML = fotos.map((_,i) => `<div class="dot ${i===0?'on':''}"></div>`).join('');
 }
 window.cerrarDetalle = function(){ document.getElementById('detail').classList.remove('open'); }
 window.cambiarCantidadDetalle = function(delta){
