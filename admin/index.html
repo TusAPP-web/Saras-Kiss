@@ -1070,29 +1070,21 @@ window.guardarProducto = async function(){
     subcategoria: document.getElementById('prodSubcategoria').value || '',
     stock: controla ? Number(document.getElementById('prodStock').value) || 0 : null,
     fotoPortada,
+    fotos: deleteField(), // por si el producto era viejo y tenía fotos pesadas adentro
     activo: true
   };
-  if(id){
-    data.fotos = deleteField(); // por si el producto era viejo y tenía fotos pesadas adentro (solo aplica al EDITAR)
-  }
   if(!data.nombre){ alert('Poné un nombre para el producto.'); return; }
 
   let prodId = id;
-  try{
-    if(id){
-      await updateDoc(doc(db, "productos", id), data);
-    } else {
-      data.creado = serverTimestamp();
-      const nuevo = await addDoc(collection(db, "productos"), data);
-      prodId = nuevo.id;
-    }
-    // Las fotos completas van aparte, y solo se piden cuando alguien abre ESE producto puntual.
-    await setDoc(doc(db, "productosFotos", prodId), { fotos: fotosTemp });
-  }catch(e){
-    console.error('Error guardando producto', e);
-    alert('No se pudo guardar el producto. Detalle: ' + (e.message || e));
-    return;
+  if(id){
+    await updateDoc(doc(db, "productos", id), data);
+  } else {
+    data.creado = serverTimestamp();
+    const nuevo = await addDoc(collection(db, "productos"), data);
+    prodId = nuevo.id;
   }
+  // Las fotos completas van aparte, y solo se piden cuando alguien abre ESE producto puntual.
+  await setDoc(doc(db, "productosFotos", prodId), { fotos: fotosTemp });
 
   cerrarModalProducto();
   await cargarProductos();
