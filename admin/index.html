@@ -112,6 +112,27 @@
   .cat-block-h{ display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
   .cat-block-h b{ font-family:'DM Serif Display', serif; font-size:14.5px; }
   .cat-block-h span{ font-size:10.5px; color:var(--danger); text-decoration:underline; cursor:pointer; }
+  .cat-color-row{
+    display:flex; align-items:center; gap:8px; margin:8px 0 5px;
+    font-size:10.5px; color:var(--ink-soft);
+  }
+  .cat-color-picker{
+    width:38px; height:30px; padding:2px; border:1px solid var(--line);
+    border-radius:8px; background:var(--card); cursor:pointer;
+  }
+  .cat-color-hex{
+    flex:1; min-width:0; padding:6px 8px; border:1px solid var(--line);
+    border-radius:8px; background:var(--card); font-family:'IBM Plex Mono',monospace;
+    font-size:10.5px; color:var(--ink);
+  }
+  .cat-color-save{
+    background:var(--accent); color:#fff; border:none; border-radius:8px;
+    padding:6px 9px; font-size:10.5px; font-weight:700;
+  }
+  .cat-color-preview{
+    width:12px; height:12px; border-radius:50%; display:inline-block;
+    border:1px solid rgba(91,58,40,.18);
+  }
   .subcat-chip{ display:inline-flex; align-items:center; gap:5px; background:var(--icon-bg); border-radius:10px; padding:4px 9px; font-size:11px; margin:3px 4px 0 0; }
   .subcat-chip span{ color:var(--danger); cursor:pointer; font-weight:700; }
   .add-subcat{ display:flex; gap:6px; margin-top:8px; }
@@ -715,24 +736,74 @@ async function cargarCategorias(){
     throw e;
   }
 }
+function hslToHex(h, s, l){
+  s /= 100; l /= 100;
+  const k = n => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = n => Math.round(255 * (l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)))));
+  return '#' + [f(0),f(8),f(4)].map(x => x.toString(16).padStart(2,'0')).join('');
+}
+function colorCategoria(c){
+  if(c && c.color) return c.color;
+  const texto = String((c && c.nombre) || 'categoria');
+  let hash = 0;
+  for(let i=0;i<texto.length;i++) hash = ((hash << 5) - hash) + texto.charCodeAt(i);
+  const hue = Math.abs(hash) % 360;
+  return hslToHex(hue, 58, 68);
+}
+function colorHexValido(valor){
+  return /^#[0-9a-fA-F]{6}$/.test(String(valor || '').trim());
+}
+function actualizarColorCategoriaInput(id, valor){
+  const hex = String(valor || '').trim();
+  const picker = document.getElementById('cat-color-' + id);
+  const texto = document.getElementById('cat-hex-' + id);
+  if(picker && colorHexValido(hex)) picker.value = hex;
+  if(texto) texto.value = hex;
+}
+window.guardarColorCategoria = async function(id){
+  const input = document.getElementById('cat-hex-' + id);
+  const color = String(input ? input.value : '').trim();
+  if(!colorHexValido(color)){
+    alert('Elegí un color válido.');
+    return;
+  }
+  await updateDoc(doc(db, "categorias", id), { color });
+  await cargarCategorias();
+}
+
 function renderCategorias(){
   const cont = document.getElementById('categoriasList');
   if(categorias.length === 0){ cont.innerHTML = '<div class="empty">Todavía no creaste categorías.</div>'; return; }
-  cont.innerHTML = categorias.map(c => `
-    <div class="cat-block">
-      <div class="cat-block-h"><b>${c.nombre}</b><span onclick="borrarCategoria('${c.id}')">Eliminar</span></div>
+  cont.innerHTML = categorias.map(c => {
+    const color = colorCategoria(c);
+    return `
+    <div class="cat-block" style="border-left:4px solid ${color};">
+      <div class="cat-block-h">
+        <b><span class="cat-color-preview" style="background:${color}"></span> ${c.nombre}</b>
+        <span onclick="borrarCategoria('${c.id}')">Eliminar</span>
+      </div>
+      <div class="cat-color-row">
+        <label for="cat-color-${c.id}">Color de la categoría</label>
+        <input class="cat-color-picker" id="cat-color-${c.id}" type="color" value="${color.startsWith('#') ? color : '#C97C55'}"
+          oninput="actualizarColorCategoriaInput('${c.id}', this.value)">
+        <input class="cat-color-hex" id="cat-hex-${c.id}" value="${color.startsWith('#') ? color : '#C97C55'}"
+          maxlength="7" placeholder="#RRGGBB">
+        <button class="cat-color-save" onclick="guardarColorCategoria('${c.id}')">Guardar</button>
+      </div>
       <div>${(c.subcategorias||[]).map((s,i) => `<span class="subcat-chip">${s}<span onclick="quitarSubcategoria('${c.id}',${i})">✕</span></span>`).join('')}</div>
       <div class="add-subcat">
         <input type="text" id="subcat-${c.id}" placeholder="Nueva subcategoría">
         <button onclick="agregarSubcategoria('${c.id}')">+</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 window.crearCategoria = async function(){
   const input = document.getElementById('nuevaCategoriaInput');
   const nombre = input.value.trim();
   if(!nombre) return;
-  await addDoc(collection(db, "categorias"), { nombre, subcategorias: [] });
+  await addDoc(collection(db, "categorias"), { nombre, subcategorias: [], color: colorCategoria({nombre}) });
   input.value = '';
   await cargarCategorias();
 }
@@ -865,7 +936,7 @@ function renderProductos(){
   const cont = document.getElementById('productosList');
   if(productos.length === 0){ cont.innerHTML = '<div class="empty">Todavía no cargaste productos. Tocá el botón + para agregar el primero.</div>'; return; }
   cont.innerHTML = productos.map(p => `
-    <div class="prod-card">
+    <div class="prod-card" style="border-left:4px solid ${colorCategoria(categorias.find(c => c.nombre === p.categoria))};">
       <div class="prod-thumb">${p.fotoPortada ? `<img src="${p.fotoPortada}">` : (p.fotos && p.fotos[0] ? `<img src="${p.fotos[0]}">` : '')}</div>
       <div class="prod-info">
         <div class="prod-nombre">${p.nombre}</div>

@@ -48,7 +48,7 @@
     padding:22px 18px 14px;
     border-bottom:1px solid var(--line);
   }
-  header img{ max-height:110px; max-width:70%; }
+  header img{ max-height:82px; max-width:46%; }
 
   .menu-btn{
     width:36px; height:36px; border-radius:50%;
@@ -76,8 +76,14 @@
   .card{
     background:var(--card); border-radius:16px; padding:12px;
     display:flex; flex-direction:column; gap:6px;
-    box-shadow:0 2px 6px rgba(91,58,40,.08);
+    box-shadow:inset 4px 0 0 var(--cat-color, var(--line)), 0 2px 6px rgba(91,58,40,.08);
     cursor:pointer;
+  }
+  .cat-badge{
+    align-self:flex-start; font-size:9px; font-weight:700;
+    color:#5B3A28; background:color-mix(in srgb, var(--cat-color) 22%, white);
+    border:1px solid color-mix(in srgb, var(--cat-color) 58%, white);
+    border-radius:8px; padding:3px 7px; line-height:1.1;
   }
   .icon-wrap{
     height:100px; border-radius:12px; background:var(--icon-bg);
@@ -108,18 +114,30 @@
   .stock-tag.out{ background:#F0D3CE; color:#A3402F; }
 
   .cart-bubble{
-    position:absolute; left:18px; top:100%; margin-top:8px;
+    position:fixed; top:12px;
+    right:max(12px, calc(50% - 228px));
     background:var(--accent-deep); color:#fff;
-    border-radius:24px; padding:10px 16px;
-    display:none; align-items:center; gap:8px;
-    font-size:12.5px; font-weight:700;
-    box-shadow:0 8px 20px rgba(168,92,60,.4);
-    cursor:pointer; z-index:15;
+    border-radius:15px; padding:8px 10px;
+    min-width:116px; display:none; align-items:center; gap:8px;
+    font-size:11px; font-weight:700;
+    box-shadow:0 7px 18px rgba(168,92,60,.35);
+    cursor:pointer; z-index:70;
+  }
+  .cart-bubble .cart-icon{
+    width:25px; height:25px; border-radius:9px;
+    background:rgba(255,255,255,.18);
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  .cart-bubble .cart-icon svg{ width:15px; height:15px; }
+  .cart-bubble .cart-info{
+    display:flex; flex-direction:column; line-height:1.1; min-width:0;
   }
   .cart-bubble .count{
-    background:rgba(255,255,255,.25); border-radius:50%;
-    width:20px; height:20px; display:flex; align-items:center; justify-content:center;
-    font-size:11px;
+    font-size:10px; opacity:.9; white-space:nowrap;
+  }
+  .cart-bubble .total{
+    font-family:'IBM Plex Mono', monospace; font-size:11px;
+    white-space:nowrap; margin-top:2px;
   }
 
   .overlay{
@@ -270,8 +288,16 @@
       <div class="badge" id="catCount">0</div>
     </div>
     <div class="cart-bubble" id="cartBubble" onclick="abrirCarrito()">
-      <span>Ver pedido</span>
-      <span class="count" id="cartCount">0</span>
+      <span class="cart-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="9" cy="20" r="1"/><circle cx="18" cy="20" r="1"/>
+          <path d="M3 4h2l2.2 11.2a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 1.9-1.5L21 8H6"/>
+        </svg>
+      </span>
+      <span class="cart-info">
+        <span class="count" id="cartCount">0 artículos</span>
+        <span class="total" id="cartBubbleTotal">$ 0</span>
+      </span>
     </div>
   </header>
 
@@ -401,6 +427,17 @@ function iconoGenerico(){
   return `<svg viewBox="0 0 40 40" fill="none" stroke="#A85C3C" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 16c0-3 2-5 5-5h14c3 0 5 2 5 5v12c0 3-2 5-5 5H13c-3 0-5-2-5-5V16z"/></svg>`;
 }
 
+function colorCategoria(c){
+  // Las categorías nuevas no dependen de una lista fija de colores:
+  // si no tienen color guardado, se calcula uno estable a partir de su nombre.
+  if(c && c.color) return c.color;
+  const texto = String((c && c.nombre) || 'categoria');
+  let hash = 0;
+  for(let i=0;i<texto.length;i++) hash = ((hash << 5) - hash) + texto.charCodeAt(i);
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue}, 58%, 68%)`;
+}
+
 function renderCategorias(){
   document.getElementById('catCount').textContent = categorias.length;
   const list = document.getElementById('catList');
@@ -429,15 +466,19 @@ function renderGrid(){
   const grid = document.getElementById('grid');
   const lista = categoriaActiva === 'Todo' ? productos : productos.filter(p => p.categoria === categoriaActiva);
   grid.innerHTML = lista.map(p => {
+    const categoria = categorias.find(c => c.nombre === p.categoria);
+    const color = colorCategoria(categoria);
     const foto = p.fotoPortada ? `<img src="${p.fotoPortada}">` : ((p.fotos && p.fotos[0]) ? `<img src="${p.fotos[0]}">` : iconoGenerico());
     let stockTag = '';
     if(p.stock !== null && p.stock !== undefined){
       if(p.stock <= 0) stockTag = `<span class="stock-tag out">Sin stock</span>`;
       else if(p.stock <= 3) stockTag = `<span class="stock-tag low">Quedan ${p.stock}</span>`;
     }
+    const catBadge = p.categoria ? `<span class="cat-badge" style="--cat-color:${color}">${p.categoria}</span>` : '';
     return `
-    <div class="card" onclick="abrirDetalle('${p.id}')">
+    <div class="card" style="--cat-color:${color}" onclick="abrirDetalle('${p.id}')">
       <div class="icon-wrap">${foto}</div>
+      ${catBadge}
       <div class="p-name">${p.nombre}</div>
       <div class="p-desc">${p.descripcion ? p.descripcion.slice(0,40) : ''}</div>
       ${stockTag}
@@ -465,7 +506,7 @@ function posicionarPopupsCatalogo(){
     Math.max(8, menuRect.bottom - appRect.top + 8) + 'px'
   );
 
-  // Carrito: arriba de la lista/grilla del catálogo.
+  // Carrito: popup arriba de la lista/grilla, debajo del encabezado.
   document.getElementById('ovCart').style.setProperty(
     '--cart-top',
     Math.max(8, headerRect.bottom - appRect.top + 10) + 'px'
@@ -498,7 +539,9 @@ function agregarAlCarrito(p, cantidad){
 function actualizarCartBubble(){
   const bubble = document.getElementById('cartBubble');
   const totalItems = carrito.reduce((a,i) => a + i.cantidad, 0);
-  document.getElementById('cartCount').textContent = totalItems;
+  document.getElementById('cartCount').textContent = `${totalItems} ${totalItems === 1 ? 'artículo' : 'artículos'}`;
+  const total = carrito.reduce((a,i) => a + i.precio*i.cantidad, 0);
+  document.getElementById('cartBubbleTotal').textContent = '$ ' + total.toLocaleString('es-AR');
   bubble.style.display = totalItems > 0 ? 'flex' : 'none';
 }
 
